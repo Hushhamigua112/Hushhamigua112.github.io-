@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>造梦师S3巅峰赛｜晋级赛实时监控 Rc.hush</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @keyframes flash-up {
+            0% { background-color: rgba(34,197,94,0.4); }
+            100% { background-color: transparent; }
+        }
+        @keyframes flash-down {
+            0% { background-color: rgba(239,68,68,0.4); }
+            100% { background-color: transparent; }
+        }
+        .rank-up { animation: flash-up 1.2s ease; }
+        .rank-down { animation: flash-down 1.2s ease; }
+        .rc-hush-row{
+            border:2px solid #facc15 !important;
+        }
+        body {
+            background:#121218;
+            color:#eee;
+        }
+    </style>
+</head>
+<body class="p-4 md:p-8 min-h-screen">
+<div class="max-w-7xl mx-auto">
+    <!--头部信息栏 -->
+    <div class="mb-6">
+        <h1 class="text-2xl md:text-3xl font-bold text-amber-400">造梦师S3巅峰赛｜晋级赛监控面板</h1>
+        <div class="flex flex-wrap gap-x-6 gap-y-2 mt-2 text-sm text-gray-300">
+            <span>赛段：晋级赛（Top48晋级半决赛，本面板重点监控前30）</span>
+            <span>重点选手：<b class="text-yellow-400">Rc.hush</b></span>
+            <span>刷新间隔：<span id="intervalTxt">3</span>秒</span>
+            <span>最后更新：<span id="lastUpdate">--</span></span>
+            <button id="toggleBtn" class="px-3 py-1 bg-amber-600 rounded">暂停/继续刷新</button>
+        </div>
+    </div>
+
+    <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <!-- 左：前五 & 后五榜单 -->
+        <div class="space-y-6">
+            <div class="border border-amber-700 rounded-lg p-4 bg-[#1a1a24]">
+                <h2 class="text-lg font-semibold text-amber-300 mb-3">🔥 当前榜单 TOP 5</h2>
+                <table class="w-full text-sm">
+                    <thead>
+                    <tr class="text-gray-400 border-b border-gray-700">
+                        <th class="py-2 text-left">排名</th>
+                        <th class="py-2 text-left">选手</th>
+                        <th class="py-2 text-right">梦想值</th>
+                        <th class="py-2 text-right">变化</th>
+                    </tr>
+                    </thead>
+                    <tbody id="top5-body"></tbody>
+                </table>
+            </div>
+
+            <div class="border border-slate-600 rounded-lg p-4 bg-[#1a1a24]">
+                <h2 class="text-lg font-semibold text-slate-300 mb-3">📉 榜单末尾 后5名</h2>
+                <table class="w-full text-sm">
+                    <thead>
+                    <tr class="text-gray-400 border-b border-gray-700">
+                        <th class="py-2 text-left">排名</th>
+                        <th class="py-2 text-left">选手</th>
+                        <th class="py-2 text-right">梦想值</th>
+                        <th class="py-2 text-right">变化</th>
+                    </tr>
+                    </thead>
+                    <tbody id="bottom5-body"></tbody>
+                </table>
+            </div>
+
+            <!-- Rc.hush 个人状态卡片 -->
+            <div class="border-2 border-yellow-500 rounded-lg p-4 bg-[#222014]">
+                <h2 class="text-lg font-semibold text-yellow-300 mb-3">⭐重点选手【Rc.hush】实时状态</h2>
+                <div class="grid grid-cols-2 gap-3 text-sm">
+                    <div>当前排名：<span id="rh-rank" class="text-xl font-bold">--</span></div>
+                    <div>梦想值：<span id="rh-score" class="text-xl font-bold">--</span></div>
+                    <div>排名变动：<span id="rh-delta">--</span></div>
+                    <div>距离30名线分差：<span id="rh-gap">--</span></div>
+                </div>
+                <div class="mt-3 text-xs text-gray-400">
+                    提示：晋级赛取Top48进半决赛；本面板同时监控前30决赛线。
+                </div>
+            </div>
+        </div>
+
+        <!-- 右：前30晋级线完整列表，监控变动 -->
+        <div class="border border-amber-700 rounded-lg p-4 bg-[#1a1a24]">
+            <h2 class="text-lg font-semibold text-amber-300 mb-3">🎯前30晋级线榜单（监控变动）</h2>
+            <div class="overflow-auto max-h-[650px]">
+                <table class="w-full text-sm">
+                    <thead class="sticky top-0 bg-[#1a1a24]">
+                    <tr class="text-gray-400 border-b border-gray-700">
+                        <th class="py-2 text-left">排名</th>
+                        <th class="py-2 text-left">选手</th>
+                        <th class="py-2 text-right">梦想值</th>
+                        <th class="py-2 text-right">变动</th>
+                    </tr>
+                    </thead>
+                    <tbody id="top30-body"></tbody>
+                </table>
+            </div>
+            <div class="mt-2 text-xs text-gray-400">
+                🟢绿色高亮=排名上升；🔴红色高亮=排名下降；黄色边框=Rc.hush行
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+//全局状态
+let timer = null;
+const REFRESH_SEC = 3;
+let lastRankMap = new Map(); //存储上一轮 {name:{rank,score}}
+let running = true;
+
+//【模拟拉取榜单函数】
+//真实使用：这里替换成请求你的榜单接口；抖音magic页面浏览器前端无法直接跨域访问webcast.amemv.com小玩法接口，需要后端代理中转拿数据
+async function fetchRankData(){
+    //====模拟数据开始====
+    const mockNames = [
+        "DL.寂","DL.星愿","小风9233","DL.逃","DL.梦伴","DL.毒","罗","DL.休","DL.小任好困","DL.小卓",
+        "DL.褐色","R.山药","R.雪音","呼吸","Xy.宙斯","DL.汉堡","v.妖蝠","y.kis","DL.心语","DL.09",
+        "DL.断线","Xy.Feng","Rc.雨天","Xy.Ro7","R.one","DL.陆逊","Xy.肘子大王","天","Rc.hush","Rc.冲冲",
+        "Xy.伊关","y.凤九","Xy.小皇少","DL.也许","Rc.樊樊","Xy.小一","Xy.早点","DL.羊"
+    ];
+    const list = mockNames.map((name,idx)=>{
+        const baseScore = Math.max(10000 - idx*1200,1200);
+        const noise = Math.floor(Math.random()*1800 - 600);
+        return {
+            name,
+            score: Math.max(baseScore + noise, 800),
+        }
+    })
+    //按score降序排序
+    list.sort((a,b)=>b.score - a.score);
+    list.forEach((it,i)=>it.rank = i+1);
+    return list;
+    //====模拟数据结束====
+    /*
+    // 真实接入示例（必须后端代理转发，前端fetch直接调用会跨域报错）
+    const resp = await fetch("/api/proxy‑magic‑rank");
+    return await resp.json();
+    */
+}
+
+//计算每一条的变动
+function getRankChange(item, lastMap){
+    const prev = lastMap.get(item.name);
+    if(!prev) return {delta:0, text:"new", cls:""};
+    const delta = prev.rank - item.rank;
+    if(delta>0){
+        return {delta, text:`↑${delta}`, cls:"rank-up"}
+    }else if(delta<0){
+        return {delta, text:`↓${Math.abs(delta)}`, cls:"rank-down"}
+    }else{
+        return {delta:0, text:"--", cls:""}
+    }
+}
+
+async function renderBoard(){
+    const fullList = await fetchRankData();
+    //保存旧数据
+    const newLastMap = new Map();
+    fullList.forEach(i=>newLastMap.set(i.name, {rank:i.rank, score:i.score}));
+
+    const top5 = fullList.slice(0,5);
+    const bottom5 = fullList.slice(-5);
+    const top30 = fullList.slice(0,30);
+    const rcHush = fullList.find(x=>x.name.toLowerCase()==="rc.hush");
+    const rank30Line = top30[29];
+
+    //渲染TOP5
+    const t5Dom = document.getElementById("top5-body");
+    t5Dom.innerHTML = top5.map(it=>{
+        const ch = getRankChange(it, lastRankMap);
+        return `<tr class="border-b border-gray-800 ${ch.cls}">
+            <td class="py-1.5">${it.rank}</td>
+            <td>${it.name}</td>
+            <td class="text-right">${it.score.toLocaleString()}</td>
+            <td class="text-right">${ch.text}</td>
+        </tr>`
+    }).join("");
+
+    //渲染bottom5
+    const b5Dom = document.getElementById("bottom5-body");
+    b5Dom.innerHTML = bottom5.map(it=>{
+        const ch = getRankChange(it, lastRankMap);
+        return `<tr class="border-b border-gray-800 ${ch.cls}">
+            <td class="py-1.5">${it.rank}</td>
+            <td>${it.name}</td>
+            <td class="text-right">${it.score.toLocaleString()}</td>
+            <td class="text-right">${ch.text}</td>
+        </tr>`
+    }).join("");
+
+    //渲染top30
+    const t30Dom = document.getElementById("top30-body");
+    t30Dom.innerHTML = top30.map(it=>{
+        const ch = getRankChange(it, lastRankMap);
+        const markRc = it.name.toLowerCase() === "rc.hush" ? "rc-hush-row" : "";
+        return `<tr class="border-b border-gray-800 ${ch.cls} ${markRc}">
+            <td class="py-1">${it.rank}</td>
+            <td>${it.name}</td>
+            <td class="text-right">${it.score.toLocaleString()}</td>
+            <td class="text-right">${ch.text}</td>
+        </tr>`
+    }).join("");
+
+    //Rc.hush卡片
+    if(rcHush){
+        document.getElementById("rh-rank").innerText = rcHush.rank;
+        document.getElementById("rh-score").innerText = rcHush.score.toLocaleString();
+        const ch = getRankChange(rcHush, lastRankMap);
+        document.getElementById("rh-delta").innerText = ch.text;
+        const gap = rcHush.score - rank30Line.score;
+        document.getElementById("rh-gap").innerText = gap.toLocaleString();
+    }else{
+        document.getElementById("rh-rank").innerText = "未上榜";
+        document.getElementById("rh-score").innerText = "--";
+        document.getElementById("rh-delta").innerText = "--";
+        document.getElementById("rh-gap").innerText = "--";
+    }
+
+    //更新时间戳
+    const now = new Date();
+    document.getElementById("lastUpdate").innerText = now.toLocaleTimeString();
+
+    //把本轮存入lastRankMap供下一轮对比
+    lastRankMap = newLastMap;
+}
+
+function startLoop(){
+    renderBoard();
+    timer = setInterval(renderBoard, REFRESH_SEC*1000);
+}
+
+function stopLoop(){
+    clearInterval(timer);
+}
+
+//按钮切换
+document.getElementById("toggleBtn").addEventListener("click",()=>{
+    if(running){
+        stopLoop();
+        running = false;
+    }else{
+        startLoop();
+        running = true;
+    }
+})
+
+//页面启动
+startLoop();
+</script>
+</body>
+</html>
